@@ -262,7 +262,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       newPlayers[playerIdx] = {
         ...player,
         position: { x, y },
-        resources: newResources,
+        resources: Math.max(0, newResources),
         skipTurn,
         resourcesGained: player.resourcesGained + resourcesGained,
       };
@@ -282,29 +282,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set((state) => {
       if (!state.gameState) return state;
       const gs = state.gameState;
+      if (gs.phase !== 'action' && gs.phase !== 'move' && gs.phase !== 'end') return state;
       const player = gs.players.find((p) => p.playerId === playerId);
       if (!player) return state;
       const { x, y } = player.position;
-      const cell = gs.map[y][x];
+      const cell = gs.map[y]?.[x];
+      if (!cell) return state;
       if (cell.ownerId === playerId) return state;
       const cost = cell.ownerId && cell.ownerId !== playerId ? 20 : 5;
       if (player.resources < cost) return state;
       const newMap = gs.map.map((row) => row.map((c) => ({ ...c })));
       newMap[y][x] = { ...cell, ownerId: playerId };
-      const prevOwnerId = cell.ownerId;
       const newPlayers = gs.players.map((p) => {
         if (p.playerId === playerId) {
-          return {
-            ...p,
-            resources: p.resources - cost,
-            ownedCells: p.ownedCells + 1,
-          };
-        }
-        if (prevOwnerId && p.playerId === prevOwnerId) {
-          return { ...p, ownedCells: Math.max(0, p.ownedCells - 1) };
+          return { ...p, resources: Math.max(0, p.resources - cost) };
         }
         return p;
       });
+      const finalPlayers = newPlayers.map((p) => ({
+        ...p,
+        ownedCells: newMap.flat().filter((c) => c.ownerId === p.playerId).length,
+      }));
       const newLogs = [
         ...gs.logs,
         {
@@ -312,11 +310,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
           turn: gs.currentTurn,
           playerId,
           action: 'occupy' as const,
-          data: { x, y, wasEnemy: !!prevOwnerId, cost, targetId: prevOwnerId },
+          data: { x, y, wasEnemy: !!cell.ownerId, cost, targetId: cell.ownerId },
           timestamp: Date.now(),
         },
       ];
-      const updated = { ...gs, map: newMap, players: newPlayers, logs: newLogs, phase: 'end' as const };
+      const updated = { ...gs, map: newMap, players: finalPlayers, logs: newLogs, phase: 'end' as const };
       localStorage.setItem('lw_gameState', JSON.stringify(updated));
       return { gameState: updated };
     }),
@@ -324,6 +322,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set((state) => {
       if (!state.gameState) return state;
       const gs = state.gameState;
+      if (gs.phase !== 'action' && gs.phase !== 'end') return state;
       const attacker = gs.players.find((p) => p.playerId === playerId);
       const cell = gs.map[targetY]?.[targetX];
       if (!attacker || !cell || !cell.ownerId || cell.ownerId === playerId) return state;
@@ -332,12 +331,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const success = Math.random() > 0.4;
       const newPlayers = gs.players.map((p) => {
         if (p.playerId === playerId) {
+          const newResources = Math.max(0, p.resources - 15 + (success ? 25 : 0));
           return {
             ...p,
-            resources: Math.max(0, p.resources - 15 + (success ? 25 : 0)),
+            resources: newResources,
             damageDealt: p.damageDealt + (success ? 20 : 0),
             resourcesGained: p.resourcesGained + (success ? 25 : 0),
-            ownedCells: p.ownedCells + (success ? 1 : 0),
+            ownedCells: success ? p.ownedCells + 1 : p.ownedCells,
           };
         }
         if (p.playerId === prevOwnerId) {
@@ -363,7 +363,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
           timestamp: Date.now(),
         },
       ];
-      const updated = { ...gs, map: newMap, players: newPlayers, logs: newLogs, phase: 'end' as const };
+      const finalPlayers = newPlayers.map((p) => ({
+        ...p,
+        ownedCells: newMap.flat().filter((c) => c.ownerId === p.playerId).length,
+      }));
+      const updated = { ...gs, map: newMap, players: finalPlayers, logs: newLogs, phase: 'end' as const };
       localStorage.setItem('lw_gameState', JSON.stringify(updated));
       return { gameState: updated };
     }),
@@ -371,6 +375,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set((state) => {
       if (!state.gameState) return state;
       const gs = state.gameState;
+      if (gs.phase !== 'action' && gs.phase !== 'end') return state;
       const exists = gs.alliances.some(
         (a) => a.playerIds.includes(playerId) && a.playerIds.includes(targetId)
       );
@@ -399,13 +404,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set((state) => {
       if (!state.gameState) return state;
       const gs = state.gameState;
+      if (gs.phase !== 'action' && gs.phase !== 'end') return state;
       const allianceIdx = gs.alliances.findIndex(
         (a) => a.playerIds.includes(playerId) && a.playerIds.includes(allyId)
       );
       if (allianceIdx === -1) return state;
       const bonus = 30;
       const newPlayers = gs.players.map((p) => {
-        if (p.playerId === playerId) return { ...p, resources: p.resources + bonus, damageDealt: p.damageDealt + 30 };
+        if (p.playerId === playerId) return { ...p, resources: Math.max(0, p.resources + bonus), resourcesGained: p.resourcesGained + bonus, damageDealt: p.damageDealt + 30 };
         if (p.playerId === allyId) return { ...p, hp: Math.max(0, p.hp - 30), damageTaken: p.damageTaken + 30 };
         return p;
       });
@@ -413,7 +419,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const newLogs = [
         ...gs.logs,
         {
-          id: 'log_' + Date.now(),
+          id: 'log_' + Date.now() + '_betray',
           turn: gs.currentTurn,
           playerId,
           action: 'betray' as const,
@@ -421,7 +427,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
           timestamp: Date.now(),
         },
       ];
-      const updated = { ...gs, players: newPlayers, alliances: newAlliances, logs: newLogs, phase: 'end' as const };
+      const finalPlayers = newPlayers.map((p) => ({
+        ...p,
+        ownedCells: gs.map.flat().filter((c) => c.ownerId === p.playerId).length,
+      }));
+      const updated = { ...gs, players: finalPlayers, alliances: newAlliances, logs: newLogs, phase: 'end' as const };
       localStorage.setItem('lw_gameState', JSON.stringify(updated));
       return { gameState: updated };
     }),
@@ -503,7 +513,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const resourcePlayers = gs.players.map((p) => {
         const owned = gs.map.flat().filter((c) => c.ownerId === p.playerId);
         const resourceGain = owned.reduce((sum, c) => sum + (c.type === 'resource' ? 5 : 1), 0);
-        return { ...p, resources: p.resources + resourceGain, resourcesGained: p.resourcesGained + resourceGain };
+        return {
+          ...p,
+          resources: Math.max(0, p.resources + resourceGain),
+          resourcesGained: p.resourcesGained + resourceGain,
+          ownedCells: owned.length,
+        };
       });
 
       const updatedAlliances = gs.alliances

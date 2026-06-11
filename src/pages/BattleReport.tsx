@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   History,
   Play,
@@ -39,6 +39,7 @@ export default function BattleReport() {
   const [isAutoPlay, setIsAutoPlay] = useState(false);
   const [filterPlayers, setFilterPlayers] = useState<string[]>([]);
   const [filterActions, setFilterActions] = useState<GameLogAction[]>([]);
+  const logRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const logs = gameState?.logs || [];
   const players = currentRoom?.currentPlayers || [];
@@ -73,19 +74,42 @@ export default function BattleReport() {
     setReplayIdx(filteredLogs.length - 1);
   }, [filteredLogs.length]);
 
+  useEffect(() => {
+    if (replayIdx >= 0 && logRefs.current[replayIdx]) {
+      logRefs.current[replayIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [replayIdx]);
+
   const getPlayer = (id: string) => players.find((p) => p.id === id);
 
   const formatDetail = (log: GameLog) => {
     const p = (id: string) => getPlayer(id)?.name || '玩家';
+    const dirMap: Record<string, string> = { up: '↑ 上', down: '↓ 下', left: '← 左', right: '→ 右' };
     switch (log.action) {
-      case 'move': return `移动到 (${log.data?.x}, ${log.data?.y})`;
-      case 'occupy': return `占领 (${log.data?.x}, ${log.data?.y})${log.data?.wasEnemy ? '（敌方）' : ''}`;
-      case 'steal': return `${log.data?.success ? '成功抢夺' : '抢夺失败'} (${log.data?.x}, ${log.data?.y})`;
-      case 'ally': return `与 ${p(log.data?.targetId)} 结盟`;
-      case 'betray': return `背叛 ${p(log.data?.targetId)}，+${log.data?.bonus}资源`;
-      case 'trap': return `触发陷阱，-${log.data?.lost}资源`;
-      case 'skill': return `使用「${log.data?.skillName || '技能'}」`;
-      default: return '';
+      case 'move':
+        return (
+          <span className="flex items-center gap-2 flex-wrap">
+            <span className="text-slate-500">起点</span>
+            <span className="text-neon-cyan font-mono">({log.data?.fromX}, {log.data?.fromY})</span>
+            <span className="text-neon-gold font-bold">{dirMap[log.data?.direction] || ''}</span>
+            <span className="text-slate-500">→ 终点</span>
+            <span className="text-neon-green font-mono">({log.data?.x}, {log.data?.y})</span>
+          </span>
+        );
+      case 'occupy':
+        return `占领 (${log.data?.x}, ${log.data?.y})${log.data?.wasEnemy ? '（敌方）' : ''}`;
+      case 'steal':
+        return `${log.data?.success ? '成功抢夺' : '抢夺失败'} (${log.data?.x}, ${log.data?.y})${log.data?.targetId ? ` · ${p(log.data.targetId)}` : ''}`;
+      case 'ally':
+        return `与 ${p(log.data?.targetId)} 结盟，持续 3 回合`;
+      case 'betray':
+        return `背刺 ${p(log.data?.targetId)}，+${log.data?.bonus} 资源`;
+      case 'trap':
+        return `触发陷阱，-${log.data?.lost} 资源，停一回合`;
+      case 'skill':
+        return `使用「${log.data?.skillName || '技能'}」`;
+      default:
+        return '';
     }
   };
 
@@ -172,7 +196,12 @@ export default function BattleReport() {
                 const active = idx === replayIdx;
                 const Icon = cfg.Icon;
                 return (
-                  <div key={log.id} onClick={() => setReplayIdx(idx)} className={cn('relative mb-4 cursor-pointer transition-all duration-300', active && 'scale-[1.02]')}>
+                  <div
+                    key={log.id}
+                    ref={(el) => { logRefs.current[idx] = el; }}
+                    onClick={() => setReplayIdx(idx)}
+                    className={cn('relative mb-4 cursor-pointer transition-all duration-300', active && 'scale-[1.02]')}
+                  >
                     <div
                       className={cn('absolute -left-[18px] top-1 w-4 h-4 rounded-full border-2 bg-midnight-900 flex items-center justify-center transition-all duration-300', active && cfg.glow, active ? 'border-opaque animate-pulse' : 'border-white/30')}
                       style={active ? { borderColor: player?.color, boxShadow: `0 0 12px ${player?.color}` } : undefined}

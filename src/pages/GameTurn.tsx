@@ -346,7 +346,7 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
               action: () => setSelectingAction('steal'),
               disabled:
                 !isMyTurn ||
-                (phase !== 'action' && phase !== 'move') ||
+                phase !== 'action' ||
                 adjacentEnemyCells.length === 0 ||
                 (currentPlayerState?.resources ?? 0) < 15,
             },
@@ -359,7 +359,8 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
                   : '持续 3 回合',
               color: 'green',
               action: () => setSelectingAction('ally'),
-              disabled: !isMyTurn || (phase !== 'action' && phase !== 'move') || nonAllyPlayers.length === 0,
+              disabled:
+                !isMyTurn || phase !== 'action' || nonAllyPlayers.length === 0,
             },
             {
               icon: Target,
@@ -367,7 +368,7 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
               desc: myAllies.length > 0 ? `获得 30 资源 (${myAllies.length}个盟友)` : '获得 30 资源',
               color: 'purple',
               action: () => setSelectingAction('betray'),
-              disabled: !isMyTurn || (phase !== 'action' && phase !== 'move') || myAllies.length === 0,
+              disabled: !isMyTurn || phase !== 'action' || myAllies.length === 0,
             },
           ].map(({ icon: Icon, label, desc, color, action, disabled }) => (
             <button

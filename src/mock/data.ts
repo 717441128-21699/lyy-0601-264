@@ -222,12 +222,16 @@ export function generateMockGameState(room: Room): GameState {
       map[y][x].ownerId = p.playerId;
     }
   });
+  const playersWithOwned = players.map((p) => ({
+    ...p,
+    ownedCells: map.flat().filter((c) => c.ownerId === p.playerId).length,
+  }));
   return {
     roomId: room.id,
     currentTurn: 1,
     currentPlayerId: room.currentPlayers[0]?.id || '',
     map,
-    players,
+    players: playersWithOwned,
     phase: 'roll',
     status: 'playing',
     alliances: [],
