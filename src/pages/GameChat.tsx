@@ -18,7 +18,8 @@ export default function GameChat({ compact = false }: { compact?: boolean }) {
   const players = currentRoom?.currentPlayers || [];
 
   useEffect(() => {
-    if (players.length > 0 && messages.length === 0) {
+    const saved = localStorage.getItem('lw_chatMessages');
+    if (players.length > 0 && messages.length === 0 && !saved) {
       initMessages(generateMockChatMessages(players));
     }
   }, [players, messages.length, initMessages]);

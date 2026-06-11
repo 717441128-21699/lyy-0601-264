@@ -11,18 +11,23 @@ import {
   Target,
   Zap,
   SkipForward,
+  X,
+  MapPin,
 } from 'lucide-react';
 import { useGameStore, useRoomStore, usePlayerStore } from '@/store';
 import { cn } from '@/lib/utils';
 
 const diceFaces = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
+type ActionType = 'steal' | 'ally' | 'betray' | null;
+
 export default function GameTurn({ compact = false }: { compact?: boolean }) {
-  const { gameState, rollDice, movePlayer, occupyCell, useSkill, endTurn } = useGameStore();
+  const { gameState, rollDice, movePlayer, occupyCell, stealCell, proposeAlliance, betray, useSkill, endTurn } = useGameStore();
   const { currentRoom } = useRoomStore();
   const { currentPlayer } = usePlayerStore();
   const [isRolling, setIsRolling] = useState(false);
   const [displayDice, setDisplayDice] = useState(1);
+  const [selectingAction, setSelectingAction] = useState<ActionType>(null);
 
   const currentPlayerInfo = currentRoom?.currentPlayers.find(
     (p) => p.id === gameState?.currentPlayerId
@@ -71,6 +76,58 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
   const handleEndTurn = () => {
     if (!isMyTurn) return;
     endTurn();
+  };
+
+  const otherPlayers = currentRoom?.currentPlayers.filter(
+    (p) => p.id !== currentPlayer?.id
+  ) || [];
+
+  const myAllies = gameState?.alliances
+    .filter((a) => a.playerIds.includes(currentPlayer?.id || ''))
+    .map((a) => a.playerIds.find((id) => id !== currentPlayer?.id) as string)
+    .filter(Boolean) || [];
+
+  const nonAllyPlayers = otherPlayers.filter((p) => !myAllies.includes(p.id));
+
+  const currentPosition = currentPlayerState?.position;
+  const adjacentEnemyCells = (() => {
+    if (!currentPosition || !gameState) return [];
+    const dirs = [
+      { dx: 0, dy: -1 },
+      { dx: 0, dy: 1 },
+      { dx: -1, dy: 0 },
+      { dx: 1, dy: 0 },
+    ];
+    const result: { x: number; y: number; ownerId: string; ownerName?: string; ownerColor?: string }[] = [];
+    dirs.forEach(({ dx, dy }) => {
+      const nx = currentPosition.x + dx;
+      const ny = currentPosition.y + dy;
+      if (nx < 0 || ny < 0 || !gameState.map[ny] || !gameState.map[ny][nx]) return;
+      const cell = gameState.map[ny][nx];
+      if (cell.ownerId && cell.ownerId !== currentPlayer?.id) {
+        const owner = currentRoom?.currentPlayers.find((p) => p.id === cell.ownerId);
+        result.push({ x: nx, y: ny, ownerId: cell.ownerId, ownerName: owner?.name, ownerColor: owner?.color });
+      }
+    });
+    return result;
+  })();
+
+  const handleStealCell = (x: number, y: number) => {
+    if (!currentPlayer) return;
+    stealCell(currentPlayer.id, x, y);
+    setSelectingAction(null);
+  };
+
+  const handleAlly = (targetId: string) => {
+    if (!currentPlayer) return;
+    proposeAlliance(currentPlayer.id, targetId);
+    setSelectingAction(null);
+  };
+
+  const handleBetray = (allyId: string) => {
+    if (!currentPlayer) return;
+    betray(currentPlayer.id, allyId);
+    setSelectingAction(null);
   };
 
   const getPhaseTip = () => {
@@ -253,10 +310,65 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
         <h3 className="text-sm font-display tracking-widest text-neon-purple mb-5 text-shadow-neon-purple text-center">⚔️ 行动面板</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { icon: Flag, label: '占领格子', desc: '消耗 5 资源', color: 'cyan', action: handleOccupy, disabled: !isMyTurn || (phase !== 'action' && phase !== 'move') },
-            { icon: Swords, label: '抢夺相邻', desc: '消耗 15 资源', color: 'red', disabled: !isMyTurn || phase !== 'action' },
-            { icon: Handshake, label: '结盟提议', desc: '持续 3 回合', color: 'green', disabled: !isMyTurn || phase !== 'action' },
-            { icon: Target, label: '背刺盟友', desc: '获得 30 资源', color: 'purple', disabled: !isMyTurn || phase !== 'action' },
+            {
+              icon: Flag,
+              label: '占领格子',
+              desc: currentPosition
+                ? (() => {
+                    const cell = gameState?.map[currentPosition.y]?.[currentPosition.x];
+                    const cost = cell?.ownerId && cell.ownerId !== currentPlayer?.id ? 20 : 5;
+                    return `消耗 ${cost} 资源`;
+                  })()
+                : '消耗 5 资源',
+              color: 'cyan',
+              action: handleOccupy,
+              disabled:
+                !isMyTurn ||
+                (phase !== 'action' && phase !== 'move') ||
+                !currentPosition ||
+                !gameState ||
+                gameState.map[currentPosition.y]?.[currentPosition.x]?.ownerId === currentPlayer?.id ||
+                (currentPlayerState &&
+                  currentPlayerState.resources <
+                    (gameState?.map[currentPosition.y]?.[currentPosition.x]?.ownerId &&
+                    gameState?.map[currentPosition.y]?.[currentPosition.x]?.ownerId !== currentPlayer?.id
+                      ? 20
+                      : 5)),
+            },
+            {
+              icon: Swords,
+              label: '抢夺相邻',
+              desc:
+                adjacentEnemyCells.length > 0
+                  ? `消耗 15 资源 (${adjacentEnemyCells.length}个目标)`
+                  : '消耗 15 资源',
+              color: 'red',
+              action: () => setSelectingAction('steal'),
+              disabled:
+                !isMyTurn ||
+                (phase !== 'action' && phase !== 'move') ||
+                adjacentEnemyCells.length === 0 ||
+                (currentPlayerState?.resources ?? 0) < 15,
+            },
+            {
+              icon: Handshake,
+              label: '结盟提议',
+              desc:
+                nonAllyPlayers.length > 0
+                  ? `持续 3 回合 (${nonAllyPlayers.length}人可结盟)`
+                  : '持续 3 回合',
+              color: 'green',
+              action: () => setSelectingAction('ally'),
+              disabled: !isMyTurn || (phase !== 'action' && phase !== 'move') || nonAllyPlayers.length === 0,
+            },
+            {
+              icon: Target,
+              label: '背刺盟友',
+              desc: myAllies.length > 0 ? `获得 30 资源 (${myAllies.length}个盟友)` : '获得 30 资源',
+              color: 'purple',
+              action: () => setSelectingAction('betray'),
+              disabled: !isMyTurn || (phase !== 'action' && phase !== 'move') || myAllies.length === 0,
+            },
           ].map(({ icon: Icon, label, desc, color, action, disabled }) => (
             <button
               key={label}
@@ -264,10 +376,14 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
               disabled={disabled}
               className={cn(
                 'relative group p-4 rounded-xl bg-midnight-800/60 border flex flex-col items-center gap-2 transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none',
-                color === 'cyan' && 'border-neon-cyan/40 text-neon-cyan hover:bg-neon-cyan/10 hover:border-neon-cyan hover:shadow-neon-cyan',
-                color === 'red' && 'border-neon-red/40 text-neon-red hover:bg-neon-red/10 hover:border-neon-red hover:shadow-neon-red',
-                color === 'green' && 'border-neon-green/40 text-neon-green hover:bg-neon-green/10 hover:border-neon-green hover:shadow-neon-green',
-                color === 'purple' && 'border-neon-purple/40 text-neon-purple hover:bg-neon-purple/10 hover:border-neon-purple hover:shadow-neon-purple'
+                color === 'cyan' &&
+                  'border-neon-cyan/40 text-neon-cyan hover:bg-neon-cyan/10 hover:border-neon-cyan hover:shadow-neon-cyan',
+                color === 'red' &&
+                  'border-neon-red/40 text-neon-red hover:bg-neon-red/10 hover:border-neon-red hover:shadow-neon-red',
+                color === 'green' &&
+                  'border-neon-green/40 text-neon-green hover:bg-neon-green/10 hover:border-neon-green hover:shadow-neon-green',
+                color === 'purple' &&
+                  'border-neon-purple/40 text-neon-purple hover:bg-neon-purple/10 hover:border-neon-purple hover:shadow-neon-purple'
               )}
             >
               <Icon className="w-7 h-7 group-hover:animate-pulse" />
@@ -277,6 +393,166 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
           ))}
         </div>
       </div>
+
+      {selectingAction && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in p-4">
+          <div className="glass-card neon-border p-6 w-full max-w-md clip-corner animate-slide-up">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-display font-bold tracking-wider">
+                {selectingAction === 'steal' && (
+                  <span className="text-neon-red text-shadow-neon-red">🗡️ 选择抢夺目标</span>
+                )}
+                {selectingAction === 'ally' && (
+                  <span className="text-neon-green text-shadow-neon-green">🤝 选择结盟对象</span>
+                )}
+                {selectingAction === 'betray' && (
+                  <span className="text-neon-purple text-shadow-neon-purple">⚔️ 选择背刺目标</span>
+                )}
+              </h3>
+              <button
+                onClick={() => setSelectingAction(null)}
+                className="w-8 h-8 rounded-lg bg-midnight-800/60 border border-white/10 text-slate-400 hover:text-white hover:border-white/30 flex items-center justify-center transition-all"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {selectingAction === 'steal' && (
+              <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
+                {adjacentEnemyCells.length === 0 && (
+                  <div className="text-center text-slate-500 py-6">附近没有可抢夺的敌方格子</div>
+                )}
+                {adjacentEnemyCells.map((cell) => {
+                  const target = currentRoom?.currentPlayers.find((p) => p.id === cell.ownerId);
+                  return (
+                    <button
+                      key={`${cell.x}-${cell.y}`}
+                      onClick={() => handleStealCell(cell.x, cell.y)}
+                      className="w-full p-3 rounded-xl bg-midnight-800/60 border border-neon-red/30 hover:border-neon-red hover:bg-neon-red/10 hover:shadow-neon-red transition-all flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                          style={{
+                            backgroundColor: `${cell.ownerColor}20`,
+                            border: `2px solid ${cell.ownerColor}`,
+                          }}
+                        >
+                          {target?.avatar || '👤'}
+                        </div>
+                        <div className="text-left">
+                          <div className="text-sm font-bold" style={{ color: cell.ownerColor }}>
+                            {cell.ownerName || '敌方'} 的领地
+                          </div>
+                          <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3" />
+                            位置 ({cell.x}, {cell.y})
+                          </div>
+                        </div>
+                      </div>
+                      <span className="chip bg-neon-red/20 text-neon-red border border-neon-red/40 text-xs">
+                        抢夺
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {selectingAction === 'ally' && (
+              <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
+                {nonAllyPlayers.length === 0 && (
+                  <div className="text-center text-slate-500 py-6">没有可结盟的玩家</div>
+                )}
+                {nonAllyPlayers.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => handleAlly(p.id)}
+                    className="w-full p-3 rounded-xl bg-midnight-800/60 border border-neon-green/30 hover:border-neon-green hover:bg-neon-green/10 hover:shadow-neon-green transition-all flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                        style={{
+                          backgroundColor: `${p.color}20`,
+                          border: `2px solid ${p.color}`,
+                        }}
+                      >
+                        {p.avatar}
+                      </div>
+                      <div className="text-left">
+                        <div className="text-sm font-bold" style={{ color: p.color }}>
+                          {p.name}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {p.title || '玩家'}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="chip bg-neon-green/20 text-neon-green border border-neon-green/40 text-xs">
+                      结盟
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {selectingAction === 'betray' && (
+              <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
+                {myAllies.length === 0 && (
+                  <div className="text-center text-slate-500 py-6">没有盟友可以背刺</div>
+                )}
+                {myAllies.map((allyId) => {
+                  const ally = currentRoom?.currentPlayers.find((p) => p.id === allyId);
+                  if (!ally) return null;
+                  const alliance = gameState?.alliances.find(
+                    (a) => a.playerIds.includes(currentPlayer?.id || '') && a.playerIds.includes(allyId)
+                  );
+                  return (
+                    <button
+                      key={allyId}
+                      onClick={() => handleBetray(allyId)}
+                      className="w-full p-3 rounded-xl bg-midnight-800/60 border border-neon-purple/30 hover:border-neon-purple hover:bg-neon-purple/10 hover:shadow-neon-purple transition-all flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                          style={{
+                            backgroundColor: `${ally.color}20`,
+                            border: `2px solid ${ally.color}`,
+                          }}
+                        >
+                          {ally.avatar}
+                        </div>
+                        <div className="text-left">
+                          <div className="text-sm font-bold" style={{ color: ally.color }}>
+                            {ally.name}
+                          </div>
+                          <div className="text-xs text-slate-400">
+                            盟友 · 剩余 {alliance?.turnLeft ?? 0} 回合
+                          </div>
+                        </div>
+                      </div>
+                      <span className="chip bg-neon-purple/20 text-neon-purple border border-neon-purple/40 text-xs">
+                        背刺 +30资源
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-5 pt-4 border-t border-white/10">
+              <button
+                onClick={() => setSelectingAction(null)}
+                className="w-full py-2.5 rounded-xl bg-midnight-800/60 border border-white/10 text-slate-400 hover:text-white hover:border-white/30 transition-all text-sm"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex justify-center pt-2">
         <button
