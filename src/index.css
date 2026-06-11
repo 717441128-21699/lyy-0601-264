@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #e2e8f0;
+}
+
+html, body, #root {
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at top left, rgba(176, 38, 255, 0.12) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(0, 240, 255, 0.10) 0%, transparent 50%),
+    #0a0614;
+  background-attachment: fixed;
+}
+
+@layer components {
+  .neon-border {
+    @apply border border-neon-cyan/40 relative overflow-hidden;
+    box-shadow: 0 0 0 1px rgba(0, 240, 255, 0.15), 0 0 15px rgba(0, 240, 255, 0.08), inset 0 0 15px rgba(0, 240, 255, 0.04);
+  }
+
+  .neon-border-purple {
+    @apply border border-neon-purple/40 relative overflow-hidden;
+    box-shadow: 0 0 0 1px rgba(176, 38, 255, 0.15), 0 0 15px rgba(176, 38, 255, 0.08), inset 0 0 15px rgba(176, 38, 255, 0.04);
+  }
+
+  .glass-card {
+    @apply bg-midnight-800/60 backdrop-blur-xl rounded-xl;
+  }
+
+  .btn-neon {
+    @apply relative px-6 py-2.5 font-display font-semibold text-sm tracking-wider uppercase
+           bg-midnight-800/80 border border-neon-cyan/60 text-neon-cyan
+           rounded-lg transition-all duration-300
+           hover:bg-neon-cyan/10 hover:border-neon-cyan hover:shadow-neon-cyan
+           active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none;
+  }
+
+  .btn-neon-purple {
+    @apply relative px-6 py-2.5 font-display font-semibold text-sm tracking-wider uppercase
+           bg-midnight-800/80 border border-neon-purple/60 text-neon-purple
+           rounded-lg transition-all duration-300
+           hover:bg-neon-purple/10 hover:border-neon-purple hover:shadow-neon-purple
+           active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-neon-gold {
+    @apply relative px-6 py-2.5 font-display font-semibold text-sm tracking-wider uppercase
+           bg-midnight-800/80 border border-neon-gold/60 text-neon-gold
+           rounded-lg transition-all duration-300
+           hover:bg-neon-gold/10 hover:border-neon-gold hover:shadow-neon-gold
+           active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-neon-red {
+    @apply relative px-6 py-2.5 font-display font-semibold text-sm tracking-wider uppercase
+           bg-midnight-800/80 border border-neon-red/60 text-neon-red
+           rounded-lg transition-all duration-300
+           hover:bg-neon-red/10 hover:border-neon-red hover:shadow-neon-red
+           active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply relative px-6 py-3 font-display font-bold text-sm tracking-widest uppercase
+           bg-gradient-to-r from-neon-cyan/20 to-neon-purple/20
+           border-2 border-neon-cyan text-white
+           rounded-xl transition-all duration-300
+           hover:from-neon-cyan/30 hover:to-neon-purple/30 hover:shadow-neon-cyan hover:shadow-neon-purple
+           active:scale-95;
+  }
+
+  .input-neon {
+    @apply w-full px-4 py-3 bg-midnight-900/80 border border-neon-cyan/30 text-white rounded-lg
+           placeholder:text-slate-500 outline-none transition-all duration-300
+           focus:border-neon-cyan focus:shadow-neon-cyan;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+
+  .heading-glow {
+    @apply font-display font-bold bg-gradient-to-r from-neon-cyan via-neon-purple to-neon-pink
+           bg-clip-text text-transparent;
+  }
+
+  .grid-cell {
+    @apply relative aspect-square border border-white/10 rounded-md transition-all duration-300
+           cursor-pointer hover:border-white/30;
+  }
+}
+
+@layer utilities {
+  .text-shadow-neon-cyan {
+    text-shadow: 0 0 8px rgba(0, 240, 255, 0.6), 0 0 20px rgba(0, 240, 255, 0.3);
+  }
+  .text-shadow-neon-purple {
+    text-shadow: 0 0 8px rgba(176, 38, 255, 0.6), 0 0 20px rgba(176, 38, 255, 0.3);
+  }
+  .text-shadow-neon-gold {
+    text-shadow: 0 0 8px rgba(255, 179, 71, 0.6), 0 0 20px rgba(255, 179, 71, 0.3);
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(0, 240, 255, 0.3);
+    border-radius: 3px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 240, 255, 0.5);
+  }
+
+  .clip-corner {
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  }
+}

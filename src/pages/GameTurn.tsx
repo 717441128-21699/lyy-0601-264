@@ -1,0 +1,298 @@
+import { useState, useEffect } from 'react';
+import {
+  Dices,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  Flag,
+  Swords,
+  Handshake,
+  Target,
+  Zap,
+  SkipForward,
+} from 'lucide-react';
+import { useGameStore, useRoomStore, usePlayerStore } from '@/store';
+import { cn } from '@/lib/utils';
+
+const diceFaces = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+
+export default function GameTurn({ compact = false }: { compact?: boolean }) {
+  const { gameState, rollDice, movePlayer, occupyCell, useSkill, endTurn } = useGameStore();
+  const { currentRoom } = useRoomStore();
+  const { currentPlayer } = usePlayerStore();
+  const [isRolling, setIsRolling] = useState(false);
+  const [displayDice, setDisplayDice] = useState(1);
+
+  const currentPlayerInfo = currentRoom?.currentPlayers.find(
+    (p) => p.id === gameState?.currentPlayerId
+  );
+  const currentPlayerState = gameState?.players.find(
+    (p) => p.playerId === gameState?.currentPlayerId
+  );
+  const isMyTurn = currentPlayer?.id === gameState?.currentPlayerId;
+  const phase = gameState?.phase || 'roll';
+  const movesRemaining = gameState?.movesRemaining ?? 0;
+
+  useEffect(() => {
+    if (gameState?.diceValue) setDisplayDice(gameState.diceValue);
+  }, [gameState?.diceValue]);
+
+  const handleRoll = () => {
+    if (!isMyTurn || phase !== 'roll' || isRolling) return;
+    setIsRolling(true);
+    let count = 0;
+    const interval = setInterval(() => {
+      setDisplayDice(Math.floor(Math.random() * 6) + 1);
+      if (++count >= 12) {
+        clearInterval(interval);
+        rollDice();
+        setIsRolling(false);
+      }
+    }, 80);
+  };
+
+  const handleMove = (dir: 'up' | 'down' | 'left' | 'right') => {
+    if (!isMyTurn || phase !== 'move' || !currentPlayer) return;
+    movePlayer(currentPlayer.id, dir);
+  };
+
+  const handleOccupy = () => {
+    if (!isMyTurn || !currentPlayer) return;
+    occupyCell(currentPlayer.id);
+  };
+
+  const handleSkill = () => {
+    if (!isMyTurn || !currentPlayer) return;
+    if (currentPlayerInfo?.skill.currentCooldown && currentPlayerInfo.skill.currentCooldown > 0) return;
+    useSkill(currentPlayer.id);
+  };
+
+  const handleEndTurn = () => {
+    if (!isMyTurn) return;
+    endTurn();
+  };
+
+  const getPhaseTip = () => {
+    if (!isMyTurn) return '等待对手行动中...';
+    switch (phase) {
+      case 'roll': return '点击骰子开始掷骰！';
+      case 'move': return `使用方向键移动，剩余 ${movesRemaining} 步`;
+      case 'action': return '选择一个行动来扩张你的势力！';
+      case 'end': return '结束回合，传递给下一位玩家';
+      default: return '';
+    }
+  };
+
+  const phaseLabel = { roll: '掷骰', move: '移动', action: '行动', end: '结算' }[phase];
+
+  return (
+    <div className="space-y-5">
+      <div className="glass-card neon-border p-5 clip-corner animate-fade-in">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-neon-purple/30 to-neon-cyan/30 border border-neon-purple/50 flex items-center justify-center text-3xl shadow-neon-purple">
+              {currentPlayerInfo?.avatar || '👤'}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-display font-bold" style={{ color: currentPlayerInfo?.color || '#00f0ff' }}>
+                  {currentPlayerInfo?.name || '未知玩家'}
+                </h2>
+                <span className={cn(
+                  'chip text-[10px]',
+                  isMyTurn
+                    ? 'bg-neon-green/20 text-neon-green border border-neon-green/40'
+                    : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                )}>
+                  {isMyTurn ? '你的回合' : '等待中'}
+                </span>
+              </div>
+              <div className="flex items-center gap-4 mt-1 text-sm text-slate-400">
+                <span>回合 <span className="text-neon-cyan font-bold">{gameState?.currentTurn || 1}</span></span>
+                <span>❤ <span className="text-neon-red font-bold">{currentPlayerState?.hp ?? 0}</span></span>
+                <span>💎 <span className="text-neon-gold font-bold">{currentPlayerState?.resources ?? 0}</span></span>
+                <span>🏴 <span className="text-neon-purple font-bold">{currentPlayerState?.ownedCells ?? 0}</span></span>
+              </div>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs text-slate-500 font-display tracking-widest">当前阶段</div>
+            <div className="text-lg font-display font-bold text-shadow-neon-cyan text-neon-cyan uppercase mt-1">
+              {phaseLabel}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-center py-2">
+        <p className={cn(
+          'inline-block px-6 py-2 rounded-full text-sm font-medium',
+          isMyTurn
+            ? 'bg-neon-cyan/10 border border-neon-cyan/40 text-neon-cyan text-shadow-neon-cyan'
+            : 'bg-slate-700/30 border border-slate-600/30 text-slate-400'
+        )}>
+          {getPhaseTip()}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="glass-card neon-border-purple p-6 flex flex-col items-center clip-corner animate-slide-up">
+          <h3 className="text-sm font-display tracking-widest text-neon-purple mb-5 text-shadow-neon-purple">🎲 骰子</h3>
+          <button
+            onClick={handleRoll}
+            disabled={!isMyTurn || phase !== 'roll' || isRolling}
+            className={cn(
+              'relative w-28 h-28 rounded-2xl bg-gradient-to-br from-midnight-700 to-midnight-900 border-2 flex items-center justify-center transition-all duration-300',
+              isMyTurn && phase === 'roll' && !isRolling
+                ? 'border-neon-cyan shadow-neon-cyan hover:scale-105 cursor-pointer'
+                : 'border-slate-600/50 cursor-not-allowed opacity-60',
+              isRolling && 'animate-shake'
+            )}
+            style={{ perspective: '500px', transformStyle: 'preserve-3d' }}
+          >
+            <span
+              className={cn('text-7xl transition-transform', isRolling && 'animate-spin')}
+              style={{
+                transform: isRolling ? 'rotateY(360deg) rotateX(360deg)' : 'none',
+                transition: isRolling ? 'transform 0.8s ease-out' : 'none',
+                color: displayDice % 2 === 0 ? '#00f0ff' : '#b026ff',
+                textShadow: `0 0 15px ${displayDice % 2 === 0 ? '#00f0ff' : '#b026ff'}`,
+              }}
+            >
+              {diceFaces[displayDice - 1]}
+            </span>
+            {isRolling && (
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-neon-cyan/20 to-neon-purple/20 animate-pulse" />
+            )}
+          </button>
+          {gameState?.diceValue && !isRolling && (
+            <div className="mt-5 text-center">
+              <div className="text-xs text-slate-500">本次点数</div>
+              <div className="text-3xl font-display font-bold text-shadow-neon-gold text-neon-gold mt-1">
+                {gameState.diceValue}
+              </div>
+            </div>
+          )}
+          <Dices className={cn('w-5 h-5 mt-5', isMyTurn && phase === 'roll' ? 'text-neon-purple' : 'text-slate-600')} />
+        </div>
+
+        <div className="glass-card neon-border p-6 flex flex-col items-center clip-corner animate-slide-up" style={{ animationDelay: '0.1s' }}>
+          <h3 className="text-sm font-display tracking-widest text-neon-cyan mb-4 text-shadow-neon-cyan">🎮 方向控制</h3>
+          <div className="relative w-44 h-44">
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className={cn(
+                'w-16 h-16 rounded-xl flex flex-col items-center justify-center border-2',
+                phase === 'move' && isMyTurn
+                  ? 'border-neon-gold bg-neon-gold/10 shadow-neon-gold'
+                  : 'border-slate-600/40 bg-midnight-800/50'
+              )}>
+                <span className="text-xs text-slate-400">剩余</span>
+                <span className="text-2xl font-display font-bold text-neon-gold text-shadow-neon-gold">{movesRemaining}</span>
+                <span className="text-xs text-slate-400">步</span>
+              </div>
+            </div>
+            {(['up', 'down', 'left', 'right'] as const).map((dir) => {
+              const Icon = { up: ArrowUp, down: ArrowDown, left: ArrowLeft, right: ArrowRight }[dir];
+              const posClass = {
+                up: 'top-0 left-1/2 -translate-x-1/2',
+                down: 'bottom-0 left-1/2 -translate-x-1/2',
+                left: 'left-0 top-1/2 -translate-y-1/2',
+                right: 'right-0 top-1/2 -translate-y-1/2',
+              }[dir];
+              return (
+                <div key={dir} className={`absolute ${posClass}`}>
+                  <button
+                    onClick={() => handleMove(dir)}
+                    disabled={!isMyTurn || phase !== 'move' || movesRemaining <= 0}
+                    className="w-12 h-12 rounded-xl bg-midnight-700/80 border border-neon-cyan/50 text-neon-cyan flex items-center justify-center hover:bg-neon-cyan/10 hover:shadow-neon-cyan transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <Icon className="w-6 h-6" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="glass-card neon-border p-6 flex flex-col items-center clip-corner animate-slide-up" style={{ animationDelay: '0.2s' }}>
+          <h3 className="text-sm font-display tracking-widest text-neon-gold mb-4 text-shadow-neon-gold">⚡ 技能</h3>
+          <button
+            onClick={handleSkill}
+            disabled={!isMyTurn || !currentPlayerInfo || (currentPlayerInfo.skill.currentCooldown ?? 0) > 0}
+            className={cn(
+              'relative w-24 h-24 rounded-2xl flex flex-col items-center justify-center transition-all duration-300 border-2 overflow-hidden',
+              isMyTurn && currentPlayerInfo && (currentPlayerInfo.skill.currentCooldown ?? 0) === 0
+                ? 'bg-gradient-to-br from-neon-gold/20 to-neon-purple/20 border-neon-gold shadow-neon-gold hover:scale-105 cursor-pointer'
+                : 'bg-midnight-800/50 border-slate-600/40 cursor-not-allowed opacity-60'
+            )}
+          >
+            <span className="text-4xl mb-1">{currentPlayerInfo?.skill.icon || '⚡'}</span>
+            <span className="text-xs font-display font-bold text-neon-gold">
+              {currentPlayerInfo?.skill.name || '技能'}
+            </span>
+            {currentPlayerInfo && (currentPlayerInfo.skill.currentCooldown ?? 0) > 0 && (
+              <div className="absolute inset-0 bg-midnight-900/80 flex items-center justify-center">
+                <span className="text-3xl font-display font-bold text-neon-red text-shadow-neon-red">
+                  {currentPlayerInfo.skill.currentCooldown}
+                </span>
+              </div>
+            )}
+          </button>
+          <p className="text-xs text-slate-400 mt-3 text-center max-w-[180px] leading-relaxed">
+            {currentPlayerInfo?.skill.description || '暂无技能'}
+          </p>
+          <div className="flex items-center gap-1 mt-2 text-xs text-slate-500">
+            <Zap className="w-3 h-3 text-neon-gold" />
+            <span>冷却: {currentPlayerInfo?.skill.cooldown ?? 0} 回合</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="glass-card neon-border-purple p-6 clip-corner animate-slide-up" style={{ animationDelay: '0.3s' }}>
+        <h3 className="text-sm font-display tracking-widest text-neon-purple mb-5 text-shadow-neon-purple text-center">⚔️ 行动面板</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { icon: Flag, label: '占领格子', desc: '消耗 5 资源', color: 'cyan', action: handleOccupy, disabled: !isMyTurn || (phase !== 'action' && phase !== 'move') },
+            { icon: Swords, label: '抢夺相邻', desc: '消耗 15 资源', color: 'red', disabled: !isMyTurn || phase !== 'action' },
+            { icon: Handshake, label: '结盟提议', desc: '持续 3 回合', color: 'green', disabled: !isMyTurn || phase !== 'action' },
+            { icon: Target, label: '背刺盟友', desc: '获得 30 资源', color: 'purple', disabled: !isMyTurn || phase !== 'action' },
+          ].map(({ icon: Icon, label, desc, color, action, disabled }) => (
+            <button
+              key={label}
+              onClick={action}
+              disabled={disabled}
+              className={cn(
+                'relative group p-4 rounded-xl bg-midnight-800/60 border flex flex-col items-center gap-2 transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none',
+                color === 'cyan' && 'border-neon-cyan/40 text-neon-cyan hover:bg-neon-cyan/10 hover:border-neon-cyan hover:shadow-neon-cyan',
+                color === 'red' && 'border-neon-red/40 text-neon-red hover:bg-neon-red/10 hover:border-neon-red hover:shadow-neon-red',
+                color === 'green' && 'border-neon-green/40 text-neon-green hover:bg-neon-green/10 hover:border-neon-green hover:shadow-neon-green',
+                color === 'purple' && 'border-neon-purple/40 text-neon-purple hover:bg-neon-purple/10 hover:border-neon-purple hover:shadow-neon-purple'
+              )}
+            >
+              <Icon className="w-7 h-7 group-hover:animate-pulse" />
+              <span className="text-sm font-display font-semibold">{label}</span>
+              <span className="text-[10px] text-slate-400">{desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex justify-center pt-2">
+        <button
+          onClick={handleEndTurn}
+          disabled={!isMyTurn}
+          className={cn(
+            'relative px-10 py-4 rounded-xl font-display font-bold tracking-widest text-base flex items-center gap-3 transition-all duration-300 border-2',
+            isMyTurn
+              ? 'bg-gradient-to-r from-neon-cyan/20 via-neon-purple/20 to-neon-pink/20 border-neon-cyan text-white hover:shadow-neon-cyan hover:shadow-neon-purple hover:scale-105'
+              : 'bg-midnight-800/50 border-slate-600/40 text-slate-500 cursor-not-allowed'
+          )}
+        >
+          <SkipForward className={cn('w-6 h-6', isMyTurn && 'animate-pulse')} />
+          结束回合
+        </button>
+      </div>
+    </div>
+  );
+}
