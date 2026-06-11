@@ -44,6 +44,8 @@ export default function BattleReport() {
   const logs = gameState?.logs || [];
   const players = currentRoom?.currentPlayers || [];
   const playerStates = gameState?.players || [];
+  const baseMap = gameState?.map || [];
+  const basePlayers = gameState?.players || [];
 
   const sortedLogs = useMemo(
     () => [...logs].sort((a, b) => a.turn - b.turn || a.timestamp - b.timestamp),
@@ -60,18 +62,73 @@ export default function BattleReport() {
     [sortedLogs, filterPlayers, filterActions]
   );
 
-  useEffect(() => {
-    if (!isAutoPlay) return;
-    if (replayIdx >= filteredLogs.length - 1) {
-      setIsAutoPlay(false);
-      return;
+  const replayState = useMemo(() => {
+    if (replayIdx < 0 || replayIdx >= filteredLogs.length) {
+      return { map: baseMap, players: basePlayers, highlightCell: null, highlightPlayer: null };
     }
-    const t = setTimeout(() => setReplayIdx((i) => i + 1), 1200);
-    return () => clearTimeout(t);
-  }, [isAutoPlay, replayIdx, filteredLogs.length]);
+    const appliedLogs = filteredLogs.slice(0, replayIdx + 1);
+    const newMap = baseMap.map((row) => row.map((c) => ({ ...c })));
+    const newPlayers = basePlayers.map((p) => ({ ...p }));
+    let highlightCell: { x: number; y: number } | null = null;
+    let highlightPlayer: string | null = null;
+
+    appliedLogs.forEach((log) => {
+      const pIdx = newPlayers.findIndex((p) => p.playerId === log.playerId);
+      if (pIdx === -1) return;
+      switch (log.action) {
+        case 'move':
+          newPlayers[pIdx] = { ...newPlayers[pIdx], position: { x: log.data.x, y: log.data.y } };
+          break;
+        case 'occupy':
+        case 'steal':
+          if (log.action === 'steal' && !log.data.success) break;
+          if (newMap[log.data.y]?.[log.data.x]) {
+            newMap[log.data.y][log.data.x] = { ...newMap[log.data.y][log.data.x], ownerId: log.playerId };
+          }
+          break;
+      }
+    });
+
+    const currentLog = filteredLogs[replayIdx];
+    if (currentLog) {
+      highlightPlayer = currentLog.playerId;
+      if (['move', 'occupy', 'steal'].includes(currentLog.action)) {
+        highlightCell = { x: currentLog.data.x, y: currentLog.data.y };
+      }
+    }
+
+    return { map: newMap, players: newPlayers, highlightCell, highlightPlayer };
+  }, [replayIdx, filteredLogs, baseMap, basePlayers]);
+
+  const handlePlay = () => {
+    if (filteredLogs.length === 0) return;
+    if (replayIdx < 0 || replayIdx >= filteredLogs.length - 1) {
+      setReplayIdx(0);
+    }
+    setIsAutoPlay(true);
+  };
+
+  const handlePause = () => {
+    setIsAutoPlay(false);
+  };
+
+  const handlePrev = () => {
+    setIsAutoPlay(false);
+    setReplayIdx((i) => Math.max(0, i - 1));
+  };
+
+  const handleNext = () => {
+    setIsAutoPlay(false);
+    setReplayIdx((i) => Math.min(filteredLogs.length - 1, i + 1));
+  };
 
   useEffect(() => {
-    setReplayIdx(filteredLogs.length - 1);
+    if (filteredLogs.length === 0) {
+      setReplayIdx(-1);
+      setIsAutoPlay(false);
+    } else if (replayIdx >= filteredLogs.length) {
+      setReplayIdx(0);
+    }
   }, [filteredLogs.length]);
 
   useEffect(() => {
@@ -138,19 +195,126 @@ export default function BattleReport() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setReplayIdx(Math.max(0, replayIdx - 1))} disabled={replayIdx <= 0} className="btn-neon !px-3 !py-2">
+          <button onClick={handlePrev} disabled={replayIdx <= 0} className="btn-neon !px-3 !py-2">
             <SkipBack className="w-4 h-4" />
           </button>
-          <button onClick={() => setIsAutoPlay(!isAutoPlay)} className={cn(isAutoPlay ? 'btn-neon-red' : 'btn-neon-gold', '!px-3 !py-2')}>
+          <button onClick={isAutoPlay ? handlePause : handlePlay} className={cn(isAutoPlay ? 'btn-neon-red' : 'btn-neon-gold', '!px-3 !py-2')}>
             {isAutoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
-          <button onClick={() => setReplayIdx(Math.min(filteredLogs.length - 1, replayIdx + 1))} disabled={replayIdx >= filteredLogs.length - 1} className="btn-neon !px-3 !py-2">
+          <button onClick={handleNext} disabled={replayIdx >= filteredLogs.length - 1} className="btn-neon !px-3 !py-2">
             <SkipForward className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
+        <div className="lg:col-span-1 space-y-5">
+          <div className="glass-card neon-border-purple p-4 clip-corner">
+            <div className="flex items-center gap-2 mb-3">
+              <History className="w-4 h-4 text-neon-purple" />
+              <span className="text-sm font-display text-neon-purple">棋盘预览</span>
+            </div>
+            <div className="space-y-3">
+              <p className="text-xs text-slate-400">
+                {replayIdx < 0
+                  ? '点击时间线或播放按钮开始回放'
+                  : `第 ${replayIdx + 1} / ${filteredLogs.length} 步`}
+              </p>
+              <div className="w-full aspect-square bg-midnight-900/80 rounded-lg border border-white/10 overflow-hidden relative">
+                {replayState.map.map((row, y) => (
+                  <div key={y} className="flex">
+                    {row.map((cell, x) => {
+                      const playerOnCell = replayState.players.find(
+                        (p) => p.position.x === x && p.position.y === y
+                      );
+                      const owner = playerOnCell
+                        ? players.find((p) => p.id === playerOnCell.playerId)
+                        : cell.ownerId
+                        ? players.find((p) => p.id === cell.ownerId)
+                        : null;
+                      const isHighlight = replayState.highlightCell?.x === x && replayState.highlightCell?.y === y;
+                      const cellTypeColors: Record<string, string> = {
+                        base: 'border-amber-400/50 bg-amber-400/10',
+                        resource: 'border-neon-green/50 bg-neon-green/10',
+                        trap: cell.isTrapActive ? 'border-neon-red/50 bg-neon-red/10' : 'border-white/10',
+                        normal: 'border-white/10',
+                      };
+                      return (
+                        <div
+                          key={`${x}-${y}`}
+                          className={cn(
+                            'relative flex-1 aspect-square border transition-all duration-300',
+                            cellTypeColors[cell.type] || cellTypeColors.normal,
+                            isHighlight && 'ring-2 ring-white z-10'
+                          )}
+                          style={
+                            owner
+                              ? {
+                                  backgroundColor: `${owner.color}25`,
+                                  borderColor: isHighlight ? '#fff' : `${owner.color}50`,
+                                  boxShadow: isHighlight ? `0 0 12px ${owner.color}` : undefined,
+                                }
+                              : undefined
+                          }
+                        >
+                          {playerOnCell && (
+                            <div
+                              className="absolute inset-1 rounded-full flex items-center justify-center text-[8px] animate-pulse"
+                              style={{
+                                backgroundColor: `${owner?.color || '#fff'}40`,
+                                border: `2px solid ${owner?.color || '#fff'}`,
+                                color: owner?.color || '#fff',
+                                fontWeight: 'bold',
+                              }}
+                            >
+                              {owner?.avatar || '●'}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-1.5">
+                {replayState.players.map((ps) => {
+                  const pr = players.find((p) => p.id === ps.playerId);
+                  if (!pr) return null;
+                  const isHighlight = replayState.highlightPlayer === ps.playerId;
+                  return (
+                    <div
+                      key={ps.playerId}
+                      className={cn(
+                        'flex items-center justify-between text-xs p-2 rounded-lg transition-all',
+                        isHighlight && 'bg-white/10 ring-1 ring-white/30'
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-sm"
+                          style={{
+                            backgroundColor: `${pr.color}20`,
+                            border: `1.5px solid ${pr.color}`,
+                            color: pr.color,
+                          }}
+                        >
+                          {pr.avatar}
+                        </span>
+                        <span style={{ color: pr.color }}>{pr.name}</span>
+                      </div>
+                      <div className="flex gap-3 text-slate-400">
+                        <span className="text-neon-green">⚡{ps.resources}</span>
+                        <span className="text-neon-purple">🏰{ps.ownedCells}</span>
+                        <span className="text-neon-cyan">📍({ps.position.x},{ps.position.y})</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="lg:col-span-2 space-y-5">
           <div className="glass-card neon-border p-4 clip-corner">
             <div className="flex items-center gap-2 mb-3">

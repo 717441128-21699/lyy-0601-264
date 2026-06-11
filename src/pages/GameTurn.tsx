@@ -20,6 +20,17 @@ import { cn } from '@/lib/utils';
 const diceFaces = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
 type ActionType = 'steal' | 'ally' | 'betray' | null;
+type PendingActionType = 'occupy' | 'steal' | 'ally' | 'betray' | null;
+
+interface PendingAction {
+  type: PendingActionType;
+  data?: any;
+  preview: string;
+  confirmText: string;
+  cost?: number;
+  gain?: number;
+  color: string;
+}
 
 export default function GameTurn({ compact = false }: { compact?: boolean }) {
   const { gameState, rollDice, movePlayer, occupyCell, stealCell, proposeAlliance, betray, useSkill, endTurn } = useGameStore();
@@ -28,6 +39,8 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
   const [isRolling, setIsRolling] = useState(false);
   const [displayDice, setDisplayDice] = useState(1);
   const [selectingAction, setSelectingAction] = useState<ActionType>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
 
   const currentPlayerInfo = currentRoom?.currentPlayers.find(
     (p) => p.id === gameState?.currentPlayerId
@@ -62,20 +75,10 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
     movePlayer(currentPlayer.id, dir);
   };
 
-  const handleOccupy = () => {
-    if (!isMyTurn || !currentPlayer) return;
-    occupyCell(currentPlayer.id);
-  };
-
   const handleSkill = () => {
     if (!isMyTurn || !currentPlayer) return;
     if (currentPlayerInfo?.skill.currentCooldown && currentPlayerInfo.skill.currentCooldown > 0) return;
     useSkill(currentPlayer.id);
-  };
-
-  const handleEndTurn = () => {
-    if (!isMyTurn) return;
-    endTurn();
   };
 
   const otherPlayers = currentRoom?.currentPlayers.filter(
@@ -90,6 +93,7 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
   const nonAllyPlayers = otherPlayers.filter((p) => !myAllies.includes(p.id));
 
   const currentPosition = currentPlayerState?.position;
+
   const adjacentEnemyCells = (() => {
     if (!currentPosition || !gameState) return [];
     const dirs = [
@@ -112,22 +116,103 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
     return result;
   })();
 
+  const handleOccupy = () => {
+    if (!isMyTurn || !currentPlayer || !currentPosition || !gameState) return;
+    const cell = gameState.map[currentPosition.y]?.[currentPosition.x];
+    if (!cell) return;
+    const cost = cell.ownerId && cell.ownerId !== currentPlayer.id ? 20 : 5;
+    setPendingAction({
+      type: 'occupy',
+      data: { x: currentPosition.x, y: currentPosition.y, cost },
+      preview: `${cell.ownerId && cell.ownerId !== currentPlayer.id ? '抢夺占领' : '占领'}格子 (${currentPosition.x}, ${currentPosition.y})${cell.ownerId && cell.ownerId !== currentPlayer.id ? ' · 敌方领地' : ' · 空地'}`,
+      confirmText: '确认占领',
+      cost,
+      color: 'cyan',
+    });
+    setSelectingAction(null);
+  };
+
   const handleStealCell = (x: number, y: number) => {
     if (!currentPlayer) return;
-    stealCell(currentPlayer.id, x, y);
+    const target = currentRoom?.currentPlayers.find((p) => p.id === adjacentEnemyCells.find((c) => c.x === x && c.y === y)?.ownerId);
+    setPendingAction({
+      type: 'steal',
+      data: { x, y },
+      preview: `抢夺 (${x}, ${y})${target ? ` · ${target.avatar} ${target.name}` : ''}`,
+      confirmText: '确认抢夺（60%成功率）',
+      cost: 15,
+      gain: 25,
+      color: 'red',
+    });
     setSelectingAction(null);
   };
 
   const handleAlly = (targetId: string) => {
     if (!currentPlayer) return;
-    proposeAlliance(currentPlayer.id, targetId);
+    const target = currentRoom?.currentPlayers.find((p) => p.id === targetId);
+    setPendingAction({
+      type: 'ally',
+      data: { targetId },
+      preview: `与 ${target?.avatar || ''} ${target?.name || '玩家'} 结盟，持续 3 回合`,
+      confirmText: '确认结盟',
+      color: 'green',
+    });
     setSelectingAction(null);
   };
 
   const handleBetray = (allyId: string) => {
     if (!currentPlayer) return;
-    betray(currentPlayer.id, allyId);
+    const ally = currentRoom?.currentPlayers.find((p) => p.id === allyId);
+    setPendingAction({
+      type: 'betray',
+      data: { allyId },
+      preview: `背刺盟友 ${ally?.avatar || ''} ${ally?.name || '玩家'}，获得 30 资源并造成 30 伤害`,
+      confirmText: '确认背刺（盟约将立即破裂）',
+      gain: 30,
+      color: 'purple',
+    });
     setSelectingAction(null);
+  };
+
+  const confirmPendingAction = () => {
+    if (!pendingAction || !currentPlayer) return;
+    switch (pendingAction.type) {
+      case 'occupy':
+        occupyCell(currentPlayer.id);
+        break;
+      case 'steal':
+        stealCell(currentPlayer.id, pendingAction.data.x, pendingAction.data.y);
+        break;
+      case 'ally':
+        proposeAlliance(currentPlayer.id, pendingAction.data.targetId);
+        break;
+      case 'betray':
+        betray(currentPlayer.id, pendingAction.data.allyId);
+        break;
+    }
+    setPendingAction(null);
+  };
+
+  const cancelPendingAction = () => {
+    setPendingAction(null);
+  };
+
+  const handleEndTurn = () => {
+    if (!isMyTurn) return;
+    if (movesRemaining > 0) {
+      setShowAbandonConfirm(true);
+    } else {
+      endTurn();
+    }
+  };
+
+  const confirmAbandonMoves = () => {
+    setShowAbandonConfirm(false);
+    endTurn();
+  };
+
+  const cancelAbandonMoves = () => {
+    setShowAbandonConfirm(false);
   };
 
   const getPhaseTip = () => {
@@ -549,6 +634,137 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
                 className="w-full py-2.5 rounded-xl bg-midnight-800/60 border border-white/10 text-slate-400 hover:text-white hover:border-white/30 transition-all text-sm"
               >
                 取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingAction && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-md animate-fade-in p-4">
+          <div className="glass-card p-6 w-full max-w-md clip-corner animate-slide-up" style={{
+            borderColor: pendingAction.color === 'cyan' ? '#00f0ff50' :
+              pendingAction.color === 'red' ? '#ff2e6350' :
+              pendingAction.color === 'green' ? '#39ff1450' : '#b026ff50',
+            boxShadow: pendingAction.color === 'cyan' ? '0 0 30px #00f0ff40' :
+              pendingAction.color === 'red' ? '0 0 30px #ff2e6340' :
+              pendingAction.color === 'green' ? '0 0 30px #39ff1440' : '0 0 30px #b026ff40',
+            borderWidth: '2px',
+            borderStyle: 'solid',
+          }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl" style={{
+                backgroundColor: pendingAction.color === 'cyan' ? '#00f0ff20' :
+                  pendingAction.color === 'red' ? '#ff2e6320' :
+                  pendingAction.color === 'green' ? '#39ff1420' : '#b026ff20',
+                border: `2px solid ${pendingAction.color === 'cyan' ? '#00f0ff' :
+                  pendingAction.color === 'red' ? '#ff2e63' :
+                  pendingAction.color === 'green' ? '#39ff14' : '#b026ff'}`,
+              }}>
+                {pendingAction.type === 'occupy' ? '🏴' :
+                 pendingAction.type === 'steal' ? '⚔️' :
+                 pendingAction.type === 'ally' ? '🤝' : '💔'}
+              </div>
+              <div>
+                <h3 className="text-xl font-display font-bold" style={{
+                  color: pendingAction.color === 'cyan' ? '#00f0ff' :
+                    pendingAction.color === 'red' ? '#ff2e63' :
+                    pendingAction.color === 'green' ? '#39ff14' : '#b026ff',
+                  textShadow: `0 0 10px ${pendingAction.color === 'cyan' ? '#00f0ff80' :
+                    pendingAction.color === 'red' ? '#ff2e6380' :
+                    pendingAction.color === 'green' ? '#39ff1480' : '#b026ff80'}`,
+                }}>
+                  确认行动
+                </h3>
+                <p className="text-xs text-slate-400">确认后将不可撤销</p>
+              </div>
+            </div>
+            <div className="bg-midnight-900/80 rounded-xl p-4 mb-5 border border-white/10">
+              <p className="text-sm text-slate-200">{pendingAction.preview}</p>
+              <div className="flex items-center gap-4 mt-3 text-xs">
+                {pendingAction.cost !== undefined && (
+                  <span className="flex items-center gap-1 text-neon-red">
+                    <span className="font-bold">消耗:</span>
+                    <span>{pendingAction.cost} 资源</span>
+                    <span className={cn((currentPlayerState?.resources ?? 0) < pendingAction.cost ? 'text-neon-red' : 'text-slate-500')}>
+                      (当前: {currentPlayerState?.resources ?? 0})
+                    </span>
+                  </span>
+                )}
+                {pendingAction.gain !== undefined && (
+                  <span className="flex items-center gap-1 text-neon-green">
+                    <span className="font-bold">收益:</span>
+                    <span>+{pendingAction.gain} 资源</span>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={cancelPendingAction}
+                className="flex-1 py-3 rounded-xl bg-midnight-800/60 border border-white/10 text-slate-300 hover:text-white hover:border-white/30 transition-all font-display font-semibold text-sm"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmPendingAction}
+                disabled={pendingAction.cost !== undefined && (currentPlayerState?.resources ?? 0) < pendingAction.cost}
+                className="flex-1 py-3 rounded-xl font-display font-semibold text-sm text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  backgroundColor: pendingAction.color === 'cyan' ? '#00f0ff20' :
+                    pendingAction.color === 'red' ? '#ff2e6320' :
+                    pendingAction.color === 'green' ? '#39ff1420' : '#b026ff20',
+                  borderColor: pendingAction.color === 'cyan' ? '#00f0ff' :
+                    pendingAction.color === 'red' ? '#ff2e63' :
+                    pendingAction.color === 'green' ? '#39ff14' : '#b026ff',
+                  borderWidth: '2px',
+                  boxShadow: `0 0 20px ${pendingAction.color === 'cyan' ? '#00f0ff60' :
+                    pendingAction.color === 'red' ? '#ff2e6360' :
+                    pendingAction.color === 'green' ? '#39ff1460' : '#b026ff60'}`,
+                }}
+              >
+                {pendingAction.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAbandonConfirm && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-md animate-fade-in p-4">
+          <div className="glass-card neon-border-amber p-6 w-full max-w-md clip-corner animate-shake">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-neon-amber/20 border-2 border-neon-amber flex items-center justify-center text-2xl">
+                ⚠️
+              </div>
+              <div>
+                <h3 className="text-xl font-display font-bold text-neon-amber text-shadow-neon-amber">
+                  放弃移动？
+                </h3>
+                <p className="text-xs text-slate-400">还有 {movesRemaining} 步未使用</p>
+              </div>
+            </div>
+            <div className="bg-midnight-900/80 rounded-xl p-4 mb-5 border border-neon-amber/20">
+              <p className="text-sm text-slate-300">
+                你还有 <span className="text-neon-amber font-bold">{movesRemaining}</span> 步可以移动。
+                如果现在结束回合，剩余步数将作废。
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                你可以先移动到资源点或敌方格子附近，再采取行动以获得最大收益。
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={cancelAbandonMoves}
+                className="flex-1 py-3 rounded-xl bg-neon-amber/20 border-2 border-neon-amber/50 text-neon-amber hover:bg-neon-amber/30 transition-all font-display font-semibold text-sm"
+              >
+                继续移动
+              </button>
+              <button
+                onClick={confirmAbandonMoves}
+                className="flex-1 py-3 rounded-xl bg-neon-red/20 border-2 border-neon-red text-neon-red hover:bg-neon-red/30 transition-all font-display font-semibold text-sm"
+              >
+                确认放弃
               </button>
             </div>
           </div>
