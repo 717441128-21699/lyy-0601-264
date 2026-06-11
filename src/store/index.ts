@@ -179,6 +179,8 @@ interface GameStore {
   endTurn: () => void;
   addLog: (log: Omit<GameLog, 'id' | 'timestamp'>) => void;
   restoreGame: (saved: GameState) => void;
+  toggleMarkLog: (logId: string) => void;
+  enterActionPhase: () => void;
 }
 
 const savedGame = localStorage.getItem('lw_gameState');
@@ -562,6 +564,31 @@ export const useGameStore = create<GameStore>((set, get) => ({
     localStorage.setItem('lw_gameState', JSON.stringify(saved));
     set({ gameState: saved });
   },
+  toggleMarkLog: (logId) =>
+    set((state) => {
+      if (!state.gameState) return state;
+      const gs = state.gameState;
+      const marked = gs.markedLogIds || [];
+      const newMarked = marked.includes(logId)
+        ? marked.filter((id) => id !== logId)
+        : [...marked, logId];
+      const updated = { ...gs, markedLogIds: newMarked };
+      localStorage.setItem('lw_gameState', JSON.stringify(updated));
+      return { gameState: updated };
+    }),
+
+  enterActionPhase: () =>
+    set((state) => {
+      if (!state.gameState) return state;
+      const gs = state.gameState;
+      if (gs.phase === 'action' || gs.phase === 'end') return state;
+      const updated = {
+        ...gs,
+        phase: 'action' as const,
+      };
+      localStorage.setItem('lw_gameState', JSON.stringify(updated));
+      return { gameState: updated };
+    }),
 }));
 
 interface ChatStore {

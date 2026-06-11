@@ -29,11 +29,13 @@ interface PendingAction {
   confirmText: string;
   cost?: number;
   gain?: number;
+  territoryDelta?: number;
+  logPreview?: string;
   color: string;
 }
 
 export default function GameTurn({ compact = false }: { compact?: boolean }) {
-  const { gameState, rollDice, movePlayer, occupyCell, stealCell, proposeAlliance, betray, useSkill, endTurn } = useGameStore();
+  const { gameState, rollDice, movePlayer, occupyCell, stealCell, proposeAlliance, betray, useSkill, endTurn, enterActionPhase } = useGameStore();
   const { currentRoom } = useRoomStore();
   const { currentPlayer } = usePlayerStore();
   const [isRolling, setIsRolling] = useState(false);
@@ -41,6 +43,7 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
   const [selectingAction, setSelectingAction] = useState<ActionType>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
+  const [showEnterActionConfirm, setShowEnterActionConfirm] = useState(false);
 
   const currentPlayerInfo = currentRoom?.currentPlayers.find(
     (p) => p.id === gameState?.currentPlayerId
@@ -121,12 +124,15 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
     const cell = gameState.map[currentPosition.y]?.[currentPosition.x];
     if (!cell) return;
     const cost = cell.ownerId && cell.ownerId !== currentPlayer.id ? 20 : 5;
+    const isEnemy = cell.ownerId && cell.ownerId !== currentPlayer.id;
     setPendingAction({
       type: 'occupy',
       data: { x: currentPosition.x, y: currentPosition.y, cost },
-      preview: `${cell.ownerId && cell.ownerId !== currentPlayer.id ? '抢夺占领' : '占领'}格子 (${currentPosition.x}, ${currentPosition.y})${cell.ownerId && cell.ownerId !== currentPlayer.id ? ' · 敌方领地' : ' · 空地'}`,
+      preview: `${isEnemy ? '抢夺占领' : '占领'}格子 (${currentPosition.x}, ${currentPosition.y})${isEnemy ? ' · 敌方领地' : ' · 空地'}`,
       confirmText: '确认占领',
       cost,
+      territoryDelta: 1,
+      logPreview: `${currentPlayer.avatar} ${currentPlayer.name} ${isEnemy ? '夺取了敌方领地' : '占领了空地'} (${currentPosition.x}, ${currentPosition.y})，消耗 ${cost} 资源`,
       color: 'cyan',
     });
     setSelectingAction(null);
@@ -142,6 +148,8 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
       confirmText: '确认抢夺（60%成功率）',
       cost: 15,
       gain: 25,
+      territoryDelta: 1,
+      logPreview: `${currentPlayer.avatar} ${currentPlayer.name} 试图抢夺 ${target?.name || '敌方'} 的领地 (${x}, ${y})，消耗 15 资源`,
       color: 'red',
     });
     setSelectingAction(null);
@@ -155,6 +163,8 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
       data: { targetId },
       preview: `与 ${target?.avatar || ''} ${target?.name || '玩家'} 结盟，持续 3 回合`,
       confirmText: '确认结盟',
+      territoryDelta: 0,
+      logPreview: `${currentPlayer.avatar} ${currentPlayer.name} 与 ${target?.name || '玩家'} 缔结同盟，持续 3 回合`,
       color: 'green',
     });
     setSelectingAction(null);
@@ -169,6 +179,8 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
       preview: `背刺盟友 ${ally?.avatar || ''} ${ally?.name || '玩家'}，获得 30 资源并造成 30 伤害`,
       confirmText: '确认背刺（盟约将立即破裂）',
       gain: 30,
+      territoryDelta: 0,
+      logPreview: `${currentPlayer.avatar} ${currentPlayer.name} 背刺了盟友 ${ally?.name || '玩家'}，获得 30 资源并造成 30 伤害`,
       color: 'purple',
     });
     setSelectingAction(null);
@@ -393,6 +405,30 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
 
       <div className="glass-card neon-border-purple p-6 clip-corner animate-slide-up" style={{ animationDelay: '0.3s' }}>
         <h3 className="text-sm font-display tracking-widest text-neon-purple mb-5 text-shadow-neon-purple text-center">⚔️ 行动面板</h3>
+
+        {phase === 'move' && movesRemaining > 0 && (
+          <div className="mb-5 p-4 rounded-xl bg-neon-amber/10 border border-neon-amber/30 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">⏸️</span>
+              <div>
+                <p className="text-sm font-display font-semibold text-neon-amber">移动阶段</p>
+                <p className="text-xs text-slate-400">你还有 <span className="text-neon-amber font-bold">{movesRemaining}</span> 步可以移动</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              移动阶段只能移动棋子，无法进行占领、抢夺等行动。
+              移动到目标位置后，可选择放弃剩余移动进入行动阶段。
+            </p>
+            <button
+              onClick={() => setShowEnterActionConfirm(true)}
+              disabled={!isMyTurn}
+              className="w-full py-2.5 rounded-lg bg-neon-amber/20 border border-neon-amber/50 text-neon-amber text-sm font-display font-semibold hover:bg-neon-amber/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              🚪 放弃移动，进入行动阶段
+            </button>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             {
@@ -409,7 +445,7 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
               action: handleOccupy,
               disabled:
                 !isMyTurn ||
-                (phase !== 'action' && phase !== 'move') ||
+                phase !== 'action' ||
                 !currentPosition ||
                 !gameState ||
                 gameState.map[currentPosition.y]?.[currentPosition.x]?.ownerId === currentPlayer?.id ||
@@ -679,9 +715,9 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
                 <p className="text-xs text-slate-400">确认后将不可撤销</p>
               </div>
             </div>
-            <div className="bg-midnight-900/80 rounded-xl p-4 mb-5 border border-white/10">
-              <p className="text-sm text-slate-200">{pendingAction.preview}</p>
-              <div className="flex items-center gap-4 mt-3 text-xs">
+            <div className="bg-midnight-900/80 rounded-xl p-4 mb-4 border border-white/10 space-y-3">
+              <p className="text-sm text-slate-200 font-medium">{pendingAction.preview}</p>
+              <div className="flex flex-wrap items-center gap-4 text-xs">
                 {pendingAction.cost !== undefined && (
                   <span className="flex items-center gap-1 text-neon-red">
                     <span className="font-bold">消耗:</span>
@@ -697,8 +733,21 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
                     <span>+{pendingAction.gain} 资源</span>
                   </span>
                 )}
+                {pendingAction.territoryDelta !== undefined && pendingAction.territoryDelta !== 0 && (
+                  <span className="flex items-center gap-1 text-neon-cyan">
+                    <span className="font-bold">领地:</span>
+                    <span>+{pendingAction.territoryDelta}</span>
+                    <span className="text-slate-500">(当前: {currentPlayerState?.ownedCells ?? 0})</span>
+                  </span>
+                )}
               </div>
             </div>
+            {pendingAction.logPreview && (
+              <div className="bg-midnight-800/50 rounded-xl p-3 mb-5 border border-dashed border-white/10">
+                <p className="text-[10px] text-slate-500 mb-1 font-display">📜 战报预览</p>
+                <p className="text-xs text-slate-300 leading-relaxed">{pendingAction.logPreview}</p>
+              </div>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={cancelPendingAction}
@@ -739,7 +788,7 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
               </div>
               <div>
                 <h3 className="text-xl font-display font-bold text-neon-amber text-shadow-neon-amber">
-                  放弃移动？
+                  放弃移动，结束回合？
                 </h3>
                 <p className="text-xs text-slate-400">还有 {movesRemaining} 步未使用</p>
               </div>
@@ -764,7 +813,51 @@ export default function GameTurn({ compact = false }: { compact?: boolean }) {
                 onClick={confirmAbandonMoves}
                 className="flex-1 py-3 rounded-xl bg-neon-red/20 border-2 border-neon-red text-neon-red hover:bg-neon-red/30 transition-all font-display font-semibold text-sm"
               >
-                确认放弃
+                确认结束
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEnterActionConfirm && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-md animate-fade-in p-4">
+          <div className="glass-card neon-border-amber p-6 w-full max-w-md clip-corner animate-shake">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-neon-amber/20 border-2 border-neon-amber flex items-center justify-center text-2xl">
+                🚪
+              </div>
+              <div>
+                <h3 className="text-xl font-display font-bold text-neon-amber text-shadow-neon-amber">
+                进入行动阶段？
+                </h3>
+                <p className="text-xs text-slate-400">剩余 {movesRemaining} 步将作废</p>
+              </div>
+            </div>
+            <div className="bg-midnight-900/80 rounded-xl p-4 mb-5 border border-neon-amber/20">
+              <p className="text-sm text-slate-300">
+                你还有 <span className="text-neon-amber font-bold">{movesRemaining}</span> 步可以移动。
+                如果现在进入行动阶段，剩余移动步数将作废。
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                进入行动阶段后，你可以进行占领、抢夺、结盟、背刺等操作。
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowEnterActionConfirm(false)}
+                className="flex-1 py-3 rounded-xl bg-midnight-800/60 border border-white/10 text-slate-300 hover:text-white hover:border-white/30 transition-all font-display font-semibold text-sm"
+              >
+                继续移动
+              </button>
+              <button
+                onClick={() => {
+                  enterActionPhase();
+                  setShowEnterActionConfirm(false);
+                }}
+                className="flex-1 py-3 rounded-xl bg-neon-cyan/20 border-2 border-neon-cyan text-neon-cyan hover:bg-neon-cyan/30 transition-all font-display font-semibold text-sm"
+              >
+                确认进入
               </button>
             </div>
           </div>

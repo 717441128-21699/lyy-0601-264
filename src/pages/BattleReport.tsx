@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   History,
   Play,
@@ -17,58 +17,90 @@ import {
   UserX,
   Gem,
   Target,
+  BookMarked,
+  BookmarkPlus,
+  RotateCcw,
+  Map,
+  ChevronDown,
+  Star,
+  Clock,
 } from 'lucide-react';
 import { useGameStore, useRoomStore } from '@/store';
 import { cn } from '@/lib/utils';
-import type { GameLogAction, Player, GameLog } from '@/types';
+import type { GameLogAction, Player, GameLog, MapCell, PlayerState } from '@/types';
+import { useNavigate } from 'react-router-dom';
 
-const ACTION_CONFIG: Record<GameLogAction, { label: string; color: string; Icon: any; glow: string; shadow: string }> = {
-  move: { label: '移动', color: 'text-neon-cyan', Icon: Move, glow: 'shadow-neon-cyan', shadow: '#00f0ff' },
-  occupy: { label: '占领', color: 'text-neon-purple', Icon: Flag, glow: 'shadow-neon-purple', shadow: '#b026ff' },
-  steal: { label: '抢夺', color: 'text-neon-red', Icon: Target, glow: 'shadow-neon-red', shadow: '#ff2e63' },
-  ally: { label: '结盟', color: 'text-neon-green', Icon: Handshake, glow: 'shadow-neon-green', shadow: '#39ff14' },
-  betray: { label: '背叛', color: 'text-neon-pink', Icon: UserX, glow: 'shadow-neon-purple', shadow: '#ff2e8a' },
-  trap: { label: '陷阱', color: 'text-neon-red', Icon: Skull, glow: 'shadow-neon-red', shadow: '#ff2e63' },
-  skill: { label: '技能', color: 'text-neon-gold', Icon: Zap, glow: 'shadow-neon-gold', shadow: '#ffb347' },
+const ACTION_CONFIG: Record<GameLogAction, { label: string; color: string; Icon: any; glow: string; shadow: string; ring: string }> = {
+  move: { label: '移动', color: 'text-neon-cyan', Icon: Move, glow: 'shadow-neon-cyan', shadow: '#00f0ff', ring: 'ring-neon-cyan/50' },
+  occupy: { label: '占领', color: 'text-neon-purple', Icon: Flag, glow: 'shadow-neon-purple', shadow: '#b026ff', ring: 'ring-neon-purple/50' },
+  steal: { label: '抢夺', color: 'text-neon-red', Icon: Target, glow: 'shadow-neon-red', shadow: '#ff2e63', ring: 'ring-neon-red/50' },
+  ally: { label: '结盟', color: 'text-neon-green', Icon: Handshake, glow: 'shadow-neon-green', shadow: '#39ff14', ring: 'ring-neon-green/50' },
+  betray: { label: '背叛', color: 'text-neon-pink', Icon: UserX, glow: 'shadow-neon-purple', shadow: '#ff2e8a', ring: 'ring-neon-purple/50' },
+  trap: { label: '陷阱', color: 'text-neon-red', Icon: Skull, glow: 'shadow-neon-red', shadow: '#ff2e63', ring: 'ring-neon-red/50' },
+  skill: { label: '技能', color: 'text-neon-gold', Icon: Zap, glow: 'shadow-neon-gold', shadow: '#ffb347', ring: 'ring-neon-gold/50' },
 };
 
 export default function BattleReport() {
-  const { gameState } = useGameStore();
+  const { gameState, toggleMarkLog } = useGameStore();
   const { currentRoom } = useRoomStore();
+  const navigate = useNavigate();
   const [replayIdx, setReplayIdx] = useState(-1);
   const [isAutoPlay, setIsAutoPlay] = useState(false);
+  const [playSpeed, setPlaySpeed] = useState(1200);
   const [filterPlayers, setFilterPlayers] = useState<string[]>([]);
   const [filterActions, setFilterActions] = useState<GameLogAction[]>([]);
+  const [turnRange, setTurnRange] = useState<{ start: number; end: number }>({ start: 1, end: 99 });
+  const [showTurnRange, setShowTurnRange] = useState(false);
+  const [onlyMarked, setOnlyMarked] = useState(false);
   const logRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const logs = gameState?.logs || [];
   const players = currentRoom?.currentPlayers || [];
   const playerStates = gameState?.players || [];
-  const baseMap = gameState?.map || [];
-  const basePlayers = gameState?.players || [];
+  const markedLogIds = gameState?.markedLogIds || [];
+  const maxTurn = gameState?.currentTurn || 1;
+
+  const initialMap = gameState?.initialMap;
+  const initialPlayers = gameState?.initialPlayers;
+  const baseMap = initialMap || gameState?.map || [];
+  const basePlayers = initialPlayers || gameState?.players || [];
 
   const sortedLogs = useMemo(
     () => [...logs].sort((a, b) => a.turn - b.turn || a.timestamp - b.timestamp),
     [logs]
   );
 
-  const filteredLogs = useMemo(
-    () =>
-      sortedLogs.filter(
-        (l) =>
-          (!filterPlayers.length || filterPlayers.includes(l.playerId)) &&
-          (!filterActions.length || filterActions.includes(l.action))
-      ),
-    [sortedLogs, filterPlayers, filterActions]
-  );
+  const filteredLogs = useMemo(() => {
+    return sortedLogs.filter((l) => {
+      if (filterPlayers.length && !filterPlayers.includes(l.playerId)) return false;
+      if (filterActions.length && !filterActions.includes(l.action)) return false;
+      if (l.turn < turnRange.start || l.turn > turnRange.end) return false;
+      if (onlyMarked && !markedLogIds.includes(l.id)) return false;
+      return true;
+    });
+  }, [sortedLogs, filterPlayers, filterActions, turnRange, onlyMarked, markedLogIds]);
 
   const replayState = useMemo(() => {
     if (replayIdx < 0 || replayIdx >= filteredLogs.length) {
-      return { map: baseMap, players: basePlayers, highlightCell: null, highlightPlayer: null };
+      const map = baseMap.map((row) => row.map((c) => ({ ...c })));
+      const ps = basePlayers.map((p) => ({ ...p }));
+      if (initialMap && initialPlayers) {
+        initialPlayers.forEach((p) => {
+          const cell = map[p.position.y]?.[p.position.x];
+          if (cell) cell.ownerId = p.playerId;
+        });
+      }
+      return { map, players: ps, highlightCell: null, highlightPlayer: null, turn: 1 };
     }
     const appliedLogs = filteredLogs.slice(0, replayIdx + 1);
     const newMap = baseMap.map((row) => row.map((c) => ({ ...c })));
-    const newPlayers = basePlayers.map((p) => ({ ...p }));
+    const newPlayers = basePlayers.map((p) => ({ ...p, position: { ...p.position } }));
+    if (initialMap && initialPlayers) {
+      initialPlayers.forEach((p) => {
+        const cell = newMap[p.position.y]?.[p.position.x];
+        if (cell) cell.ownerId = p.playerId;
+      });
+    }
     let highlightCell: { x: number; y: number } | null = null;
     let highlightPlayer: string | null = null;
 
@@ -97,39 +129,70 @@ export default function BattleReport() {
       }
     }
 
-    return { map: newMap, players: newPlayers, highlightCell, highlightPlayer };
-  }, [replayIdx, filteredLogs, baseMap, basePlayers]);
+    const turn = currentLog?.turn || 1;
+    const playersWithOwned = newPlayers.map((p) => ({
+      ...p,
+      ownedCells: newMap.flat().filter((c) => c.ownerId === p.playerId).length,
+    }));
 
-  const handlePlay = () => {
+    return { map: newMap, players: playersWithOwned, highlightCell, highlightPlayer, turn };
+  }, [replayIdx, filteredLogs, baseMap, basePlayers, initialMap, initialPlayers]);
+
+  const handlePlay = useCallback(() => {
     if (filteredLogs.length === 0) return;
-    if (replayIdx < 0 || replayIdx >= filteredLogs.length - 1) {
+    if (replayIdx >= filteredLogs.length - 1) {
       setReplayIdx(0);
     }
     setIsAutoPlay(true);
-  };
+  }, [filteredLogs.length, replayIdx]);
 
-  const handlePause = () => {
+  const handlePause = useCallback(() => {
     setIsAutoPlay(false);
-  };
+  }, []);
 
-  const handlePrev = () => {
+  const handleReset = useCallback(() => {
+    setIsAutoPlay(false);
+    setReplayIdx(0);
+  }, []);
+
+  const handlePrev = useCallback(() => {
     setIsAutoPlay(false);
     setReplayIdx((i) => Math.max(0, i - 1));
-  };
+  }, []);
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     setIsAutoPlay(false);
     setReplayIdx((i) => Math.min(filteredLogs.length - 1, i + 1));
+  }, [filteredLogs.length]);
+
+  const handleJumpToMap = () => {
+    if (replayIdx < 0) return;
+    navigate('/game/map');
   };
+
+  const handleToggleMark = (logId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    toggleMarkLog(logId);
+  };
+
+  useEffect(() => {
+    if (!isAutoPlay) return;
+    if (replayIdx >= filteredLogs.length - 1) {
+      setIsAutoPlay(false);
+      return;
+    }
+    const t = setTimeout(() => setReplayIdx((i) => i + 1), playSpeed);
+    return () => clearTimeout(t);
+  }, [isAutoPlay, replayIdx, filteredLogs.length, playSpeed]);
 
   useEffect(() => {
     if (filteredLogs.length === 0) {
       setReplayIdx(-1);
       setIsAutoPlay(false);
-    } else if (replayIdx >= filteredLogs.length) {
+    } else if (replayIdx >= filteredLogs.length || replayIdx < 0) {
       setReplayIdx(0);
     }
-  }, [filteredLogs.length]);
+  }, [filteredLogs.length, filterPlayers, filterActions, turnRange, onlyMarked]);
 
   useEffect(() => {
     if (replayIdx >= 0 && logRefs.current[replayIdx]) {
@@ -194,16 +257,29 @@ export default function BattleReport() {
             <p className="text-xs text-slate-400 mt-0.5">回合 {gameState?.currentTurn || 1} · {filteredLogs.length} 条记录</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={handlePrev} disabled={replayIdx <= 0} className="btn-neon !px-3 !py-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={handleReset} className="btn-neon !px-3 !py-2" title="从头开始">
+            <RotateCcw className="w-4 h-4" />
+          </button>
+          <button onClick={handlePrev} disabled={replayIdx <= 0 || filteredLogs.length === 0} className="btn-neon !px-3 !py-2">
             <SkipBack className="w-4 h-4" />
           </button>
-          <button onClick={isAutoPlay ? handlePause : handlePlay} className={cn(isAutoPlay ? 'btn-neon-red' : 'btn-neon-gold', '!px-3 !py-2')}>
+          <button onClick={isAutoPlay ? handlePause : handlePlay} disabled={filteredLogs.length === 0} className={cn(isAutoPlay ? 'btn-neon-red' : 'btn-neon-gold', '!px-4 !py-2')}>
             {isAutoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
-          <button onClick={handleNext} disabled={replayIdx >= filteredLogs.length - 1} className="btn-neon !px-3 !py-2">
+          <button onClick={handleNext} disabled={replayIdx >= filteredLogs.length - 1 || filteredLogs.length === 0} className="btn-neon !px-3 !py-2">
             <SkipForward className="w-4 h-4" />
           </button>
+          <select
+            value={playSpeed}
+            onChange={(e) => setPlaySpeed(Number(e.target.value))}
+            className="bg-midnight-800/60 border border-white/20 text-slate-300 text-xs rounded-lg px-2 py-2 focus:outline-none focus:border-neon-cyan/60 cursor-pointer"
+          >
+            <option value={2000}>0.5×</option>
+            <option value={1200}>1×</option>
+            <option value={600}>2×</option>
+            <option value={300}>4×</option>
+          </select>
         </div>
       </div>
 
@@ -317,10 +393,63 @@ export default function BattleReport() {
 
         <div className="lg:col-span-2 space-y-5">
           <div className="glass-card neon-border p-4 clip-corner">
-            <div className="flex items-center gap-2 mb-3">
-              <Filter className="w-4 h-4 text-neon-cyan" />
-              <span className="text-sm font-display text-neon-cyan">筛选条件</span>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-neon-cyan" />
+                <span className="text-sm font-display text-neon-cyan">筛选条件</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setOnlyMarked(!onlyMarked)}
+                  className={cn(
+                    'chip border transition-all text-xs',
+                    onlyMarked
+                      ? 'bg-neon-amber/20 text-neon-amber border-neon-amber/50'
+                      : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/30'
+                  )}
+                >
+                  <BookMarked className="w-3 h-3" />
+                  只看标记
+                </button>
+                <button
+                  onClick={() => setShowTurnRange(!showTurnRange)}
+                  className="chip border border-white/10 bg-white/5 text-slate-400 hover:border-white/30 text-xs transition-all"
+                >
+                  <Clock className="w-3 h-3" />
+                  回合范围
+                  <ChevronDown className={cn('w-3 h-3 transition-transform', showTurnRange && 'rotate-180')} />
+                </button>
+              </div>
             </div>
+            {showTurnRange && (
+              <div className="mb-3 p-3 rounded-lg bg-midnight-900/60 border border-white/10 space-y-2 animate-fade-in">
+                <p className="text-xs text-slate-400">查看回合范围：第 {turnRange.start} ~ {turnRange.end} 回合</p>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-slate-500 mb-1 block">起始</label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={maxTurn}
+                      value={turnRange.start}
+                      onChange={(e) => setTurnRange((t) => ({ ...t, start: Math.min(Number(e.target.value), t.end) }))}
+                      className="w-full accent-neon-cyan"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] text-slate-500 mb-1 block">结束</label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={maxTurn}
+                      value={turnRange.end}
+                      onChange={(e) => setTurnRange((t) => ({ ...t, end: Math.max(Number(e.target.value), t.start) }))}
+                      className="w-full accent-neon-purple"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 {players.map((p) => (
@@ -358,6 +487,7 @@ export default function BattleReport() {
                 const cfg = ACTION_CONFIG[log.action];
                 const player = getPlayer(log.playerId);
                 const active = idx === replayIdx;
+                const marked = markedLogIds.includes(log.id);
                 const Icon = cfg.Icon;
                 return (
                   <div
@@ -372,7 +502,12 @@ export default function BattleReport() {
                     >
                       {active && <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: player?.color }} />}
                     </div>
-                    <div className={cn('rounded-lg border p-3 transition-all duration-300', active ? 'bg-midnight-700/80 border-neon-cyan/60 shadow-neon-cyan' : 'bg-midnight-800/40 border-white/10 hover:border-white/20')}>
+                    <div className={cn('rounded-lg border p-3 transition-all duration-300 relative', active ? 'bg-midnight-700/80 border-neon-cyan/60 shadow-neon-cyan' : 'bg-midnight-800/40 border-white/10 hover:border-white/20')}>
+                      {marked && (
+                        <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-neon-amber flex items-center justify-center text-xs shadow-neon-amber z-10">
+                          <Star className="w-3 h-3 text-midnight-900 fill-midnight-900" />
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="chip bg-neon-purple/20 text-neon-purple border border-neon-purple/40 text-[10px]">回合 {log.turn}</span>
                         <span className="chip bg-white/5 text-slate-300 border border-white/10 text-[10px]">{new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</span>
@@ -382,6 +517,30 @@ export default function BattleReport() {
                         </div>
                       </div>
                       <p className="text-sm text-slate-300 mt-2 pl-1">{formatDetail(log)}</p>
+                      <div className="flex items-center gap-2 mt-3 pt-2 border-t border-white/5">
+                        <button
+                          onClick={(e) => handleToggleMark(log.id, e)}
+                          className={cn(
+                            'flex items-center gap-1 text-xs px-2 py-1 rounded-lg transition-all',
+                            marked
+                              ? 'bg-neon-amber/20 text-neon-amber border border-neon-amber/40'
+                              : 'bg-white/5 text-slate-400 hover:text-neon-amber hover:border-neon-amber/40 border border-transparent'
+                          )}
+                        >
+                          {marked ? <BookMarked className="w-3 h-3" /> : <BookmarkPlus className="w-3 h-3" />}
+                          {marked ? '已标记' : '标记'}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleJumpToMap(); }}
+                          className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-white/5 text-slate-400 hover:text-neon-cyan hover:border-neon-cyan/40 border border-transparent transition-all"
+                        >
+                          <Map className="w-3 h-3" />
+                          查看地图
+                        </button>
+                        <span className="ml-auto text-[10px] text-slate-500">
+                          第 {idx + 1} / {filteredLogs.length} 步
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );

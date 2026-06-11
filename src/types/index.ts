@@ -86,6 +86,9 @@ export interface GameState {
   diceValue: number | null;
   movesRemaining: number;
   winnerId: string | null;
+  initialMap?: MapCell[][];
+  initialPlayers?: PlayerState[];
+  markedLogIds?: string[];
 }
 
 export interface Room {

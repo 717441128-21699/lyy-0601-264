@@ -215,7 +215,9 @@ export function generateMockGameState(room: Room): GameState {
       resourcesGained: 0,
     };
   });
-  const map = generateInitialMap();
+  const initialMap = generateInitialMap();
+  const initialPlayers = players.map((p) => ({ ...p, position: { ...p.position } }));
+  const map = initialMap.map((row) => row.map((c) => ({ ...c })));
   players.forEach((p, i) => {
     const { x, y } = p.position;
     if (map[y] && map[y][x]) {
@@ -239,6 +241,9 @@ export function generateMockGameState(room: Room): GameState {
     diceValue: null,
     movesRemaining: 0,
     winnerId: null,
+    initialMap,
+    initialPlayers,
+    markedLogIds: [],
   };
 }
 
